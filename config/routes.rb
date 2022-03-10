@@ -1,3 +1,3 @@
 Rails.application.routes.draw do
-  # For details on the DSL available within this file, see https://guides.rubyonrails.org/routing.html
+  post '/validate_addresses', to: 'api_requests#create', defaults: { format: :json }
 end

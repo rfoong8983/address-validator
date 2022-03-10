@@ -3,6 +3,10 @@
 class UsStreetMultipleValidator
   include SmartyStreets::USStreet::MatchType
 
+  def initialize(api_request)
+    @api_request = api_request
+  end
+
   def build_credentials
     log_info 'Creating static credentials'
 
@@ -111,10 +115,15 @@ class UsStreetMultipleValidator
 
     begin
       log_info 'Sending batch address validation request'
+
+      @api_request.start!
       result = client.send_batch(batch)
+      @api_request.complete!
+
       log_info 'Successfully sent batch address validation request'
     rescue SmartyStreets::SmartyError => err
       log_error err
+      @api_request.fail!
       raise err
     end
 

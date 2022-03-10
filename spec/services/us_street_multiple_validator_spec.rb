@@ -3,7 +3,9 @@
 require 'rails_helper'
 
 RSpec.describe UsStreetMultipleValidator do
-  subject { described_class.new }
+  let(:api_request) { create :api_request }
+
+  subject { described_class.new(api_request) }
 
   describe '#build_credentials' do
     let(:err) { 'Could not find auth ID or auth token' }
