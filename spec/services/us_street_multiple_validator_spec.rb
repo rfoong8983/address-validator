@@ -194,4 +194,24 @@ RSpec.describe UsStreetMultipleValidator do
       expect(subject.transform_result(batch, requested_addresses, invalid_addresses)).to eql(expected_result)
     end
   end
+
+  describe '#get_cache_key_for' do
+    let(:all_lookups) do
+      [
+        OpenStruct.new(street: '225 Judah Street',
+                       city: 'San Francisco',
+                       state: 'CA',
+                       zipcode: '94122'),
+        OpenStruct.new(street: 'foo3',
+                       city: 'foo',
+                       state: 'BA',
+                       zipcode: '91210')
+      ]
+    end
+    let(:expectd_cache_key) { '225 judah street, san francisco, ca, 94122|foo3, foo, ba, 91210' }
+
+    it 'joins address parts separated by ", ", joins the addresses separated by "|", and lowercases string' do
+      expect(subject.get_cache_key_for(all_lookups)).to eql(expectd_cache_key)
+    end
+  end
 end

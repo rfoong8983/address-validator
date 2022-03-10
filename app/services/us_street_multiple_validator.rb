@@ -71,7 +71,7 @@ class UsStreetMultipleValidator
     batch
   end
 
-  def transform_result(batch, matched_addresses, invalid_addresses)
+  def transform_result(batch, invalid_addresses)
     results = []
     # Process addresses received in request with missing fields, not sent to API
     invalid_addresses.each do |address|
@@ -131,7 +131,11 @@ class UsStreetMultipleValidator
       log_info 'Sending batch address validation request'
 
       @api_request.start!
-      result = client.send_batch(batch)
+
+      Rails.cache.fetch(get_cache_key_for(batch.all_lookups)) do
+        client.send_batch(batch)
+      end
+
       @api_request.complete!
 
       log_info 'Successfully sent batch address validation request'
@@ -141,7 +145,36 @@ class UsStreetMultipleValidator
       raise err
     end
 
-    transform_result(batch, result, invalid_addresses)
+    transform_result(batch, invalid_addresses)
+  end
+
+  def get_match_info(dpv_match_code)
+    info = {
+      'Y' => 'Confirmed; entire address is present in the USPS data.',
+      'N' => 'Not confirmed; address is not present in the USPS data.',
+      'S' => 'Confirmed by ignoring secondary info; the main address is present in the USPS data, but the submitted secondary information (apartment, suite, etc.) was not recognized.',
+      'D' => 'Confirmed but missing secondary info; the main address is present in the USPS data, but it is missing secondary information (apartment, suite, etc.).'
+    }
+
+    additional_info = info[dpv_match_code]
+
+    if !additional_info
+      "No match info for dpv_match_code: #{dpv_match_code}"
+    else
+      additional_info
+    end
+  end
+
+  def get_cache_key_for(all_lookups)
+    key = ''
+
+    all_lookups.each_with_index do |lookup, index|
+      address_str = [lookup.street.to_s, lookup.city.to_s, lookup.state.to_s, lookup.zipcode.to_s].join(', ')
+      address_str += '|' if index != all_lookups.length - 1
+      key += address_str.downcase
+    end
+
+    key
   end
 
   private
@@ -168,22 +201,5 @@ class UsStreetMultipleValidator
 
   def log_error(message)
     Rails.logger.error "#{self.class} - #{message}"
-  end
-
-  def get_match_info(dpv_match_code)
-    info = {
-      'Y' => 'Confirmed; entire address is present in the USPS data.',
-      'N' => 'Not confirmed; address is not present in the USPS data.',
-      'S' => 'Confirmed by ignoring secondary info; the main address is present in the USPS data, but the submitted secondary information (apartment, suite, etc.) was not recognized.',
-      'D' => 'Confirmed but missing secondary info; the main address is present in the USPS data, but it is missing secondary information (apartment, suite, etc.).'
-    }
-
-    additional_info = info[dpv_match_code]
-
-    if !additional_info
-      "No match info for dpv_match_code: #{dpv_match_code}"
-    else
-      additional_info
-    end
   end
 end
