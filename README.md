@@ -22,3 +22,6 @@ Things you may want to cover:
 * Deployment instructions
 
 * ...
+
+## Next Steps
+* Allowing consumer of API to choose type of matching - strict, invalid, enhanced. See: https://www.smarty.com/docs/cloud/us-street-api for information on type of `match`

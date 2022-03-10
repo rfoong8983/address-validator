@@ -139,46 +139,29 @@ RSpec.describe UsStreetMultipleValidator do
   end
 
   describe '#transform_results' do
-    let(:addresses) do
+    let(:populated_result) do
       [
-        { },
-        { 
-          'delivery_line_1' => '225 Judah Street',
-          'components' => {
-            'city_name' => 'San Francisco',
-            'state_abbreviation' => 'CA',
-            'zipcode' => '94122',
-          },
-          'metadata' => {
-            'latitude' => 30.0,
-            'longitude' => 30.0
-          },
-          'analysis' => {
-            'dpv_match_code' => 'Y'
-          }
-        },
-        { 
-          'delivery_line_1' => '225 foo ave',
-          'components' => {
-            'city_name' => 'San France',
-            'state_abbreviation' => 'CC',
-            'zipcode' => '94112',
-          },
-          'metadata' => {
-            'latitude' => 10.0,
-            'longitude' => 10.0
-          },
-          'analysis' => {
-            'dpv_match_code' => 'N'
-          }
-        }
+        OpenStruct.new(metadata: OpenStruct.new(latitude: 30.0, longitude: 30.0),
+                       analysis: OpenStruct.new(dpv_match_code: 'Y'))
       ]
     end
-    let(:invalid_addresses) { [addresses[0]] }
-    let(:requested_addresses) { addresses.slice(1..) }
-
+    let(:requested_addresses) do
+      [
+        OpenStruct.new(street: '225 Judah Street',
+                       city: 'San Francisco',
+                       state: 'CA',
+                       zipcode: '94122',
+                       result: populated_result),
+        OpenStruct.new(street: 'foo3',
+                       city: 'foo',
+                       state: 'BA',
+                       zipcode: '91210',
+                       result: [])
+      ]
+    end
+    let(:batch) { SmartyStreets::Batch.new }
+    let(:invalid_addresses) { [{ }] }
     let(:invalid_address_info) { 'Address was missing a required field' }
-
     let(:expected_result) do
       [
         { valid: false, additional_info: invalid_address_info },
@@ -193,20 +176,22 @@ RSpec.describe UsStreetMultipleValidator do
           additional_info: 'Confirmed; entire address is present in the USPS data.'
         },
         { 
-          address_line_one: '225 foo ave',
-          city: 'San France',
-          state: 'CC',
-          zip_code: '94112',
-          latitude: 10.0,
-          longitude: 10.0,
+          address_line_one: 'foo3',
+          city: 'foo',
+          state: 'BA',
+          zip_code: '91210',
           valid: false,
-          additional_info: 'Not confirmed; address is not present in the USPS data.'
+          additional_info: 'API returned no result for this address'
         }
       ]
     end
 
+    before do
+      batch.instance_variable_set(:@all_lookups, requested_addresses)
+    end
+
     it 'adds a "valid" key and "additional" info key for all addresses and latitude/longitude for requested addresses' do
-      expect(subject.transform_result(requested_addresses, invalid_addresses)).to eql(expected_result)
+      expect(subject.transform_result(batch, requested_addresses, invalid_addresses)).to eql(expected_result)
     end
   end
 end

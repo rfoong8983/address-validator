@@ -71,28 +71,42 @@ class UsStreetMultipleValidator
     batch
   end
 
-  def transform_result(requested_addresses, invalid_addresses)
+  def transform_result(batch, matched_addresses, invalid_addresses)
     results = []
+    # Process addresses received in request with missing fields, not sent to API
     invalid_addresses.each do |address|
       results.push(address.merge(valid: false, additional_info: 'Address was missing a required field'))
     end
 
-    requested_addresses.each do |address|
-      components = address['components']
-      metadata = address['metadata']
-      analysis = address['analysis']
-      dpv_match_code = analysis['dpv_match_code']
+    batch.each do |lookup|
+      address = { address_line_one: lookup.street,
+                 city: lookup.city,
+                 state: lookup.state,
+                 zip_code: lookup.zipcode }
 
-      result = { address_line_one: address['delivery_line_1'],
-                 city: components['city_name'],
-                 state: components['state_abbreviation'],
-                 zip_code: components['zipcode'],
-                 latitude: metadata['latitude'],
-                 longitude: metadata['longitude'],
-                 valid: dpv_match_code == 'Y' ? true : false,
-                 additional_info: get_match_info(dpv_match_code) }
+      result = lookup.result.first
+      if result.present?
+        # Process address requested in API with match
+        metadata = result&.metadata
+        analysis = result&.analysis
+        dpv_match_code = analysis&.dpv_match_code
+        latitude = metadata&.latitude
+        longitude = metadata&.longitude
 
-      results.push(result)
+        if dpv_match_code.blank? || latitude.blank? || longitude.blank?
+          log_warn "Match code, latitude, or longitude missing from api request: #{api_request.reference_uuid}"
+        end
+
+        address = address.merge(latitude: latitude,
+                                longitude: longitude,
+                                valid: dpv_match_code == 'Y' ? true : false,
+                                additional_info: get_match_info(dpv_match_code))
+      else
+        # Process address requested in API with no result
+        address = address.merge(valid: false, additional_info: 'API returned no result for this address')
+      end
+
+      results.push(address)
     end
 
     results
@@ -127,7 +141,7 @@ class UsStreetMultipleValidator
       raise err
     end
 
-    transform_result(result, invalid_addresses)
+    transform_result(batch, result, invalid_addresses)
   end
 
   private
@@ -148,7 +162,7 @@ class UsStreetMultipleValidator
     Rails.logger.info "#{self.class} - #{message}"
   end
 
-  def log_warning(message)
+  def log_warn(message)
     Rails.logger.warn "#{self.class} - #{message}"
   end
 
@@ -164,6 +178,12 @@ class UsStreetMultipleValidator
       'D' => 'Confirmed but missing secondary info; the main address is present in the USPS data, but it is missing secondary information (apartment, suite, etc.).'
     }
 
-    info[dpv_match_code]
+    additional_info = info[dpv_match_code]
+
+    if !additional_info
+      "No match info for dpv_match_code: #{dpv_match_code}"
+    else
+      additional_info
+    end
   end
 end
