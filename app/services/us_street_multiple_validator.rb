@@ -4,19 +4,94 @@ class UsStreetMultipleValidator
   include SmartyStreets::USStreet::MatchType
 
   def build_credentials
-    Rails.logger.info "#{self.class} - Creating static credentials"
+    log_info 'Creating static credentials'
 
     if auth_id.nil? || auth_token.nil?
       err = 'Could not find auth ID or auth token'
-      Rails.logger.error err
-      raise 'Could not find auth ID or auth token'
+      log_error err
+      raise err
     end
 
     credentials = SmartyStreets::StaticCredentials.new(auth_id, auth_token)
 
-    Rails.logger.info "#{self.class} - Static credentials created"
+    log_info 'Static credentials created'
 
     credentials
+  end
+
+  def valid_address?(address)
+    address[:address_line_one].present? && \
+      address[:city].present? && \
+      address[:state].present? && \
+      address[:zip_code].present?
+  end
+
+  def validate_addresses(addresses)
+    valid_addresses = []
+    invalid_addresses = []
+
+    addresses.each do |address|
+      valid_addresses << address if valid_address?(address)
+      invalid_addresses << address if !valid_address?(address)
+    end
+
+    {
+      valid: valid_addresses,
+      invalid: invalid_addresses
+    }
+  end
+
+  def add_to_batch(batch, batch_item_number, address)
+    log_info "Adding address #{batch_item_number} to batch"
+    # Documentation for input fields can be found at:
+    # https://smartystreets.com/docs/cloud/us-street-api
+    batch.add(SmartyStreets::USStreet::Lookup.new)
+    batch[batch_item_number].street = address[:address_line_one]
+    batch[batch_item_number].city = address[:city]
+    batch[batch_item_number].state = address[:state]
+    batch[batch_item_number].zipcode = address[:zip_code]
+    batch[batch_item_number].match = STRICT
+
+    log_info "Finished adding address #{batch_item_number} to batch"
+
+    batch
+  end
+
+  def build_batch(addresses)
+    batch = SmartyStreets::Batch.new
+
+    addresses.each_with_index do |address, index|
+      add_to_batch(batch, index, address)
+    end
+
+    batch
+  end
+
+  def transform_result(requested_addresses, invalid_addresses)
+    results = []
+    invalid_addresses.each do |address|
+      results.push(address.merge(valid: false, additional_info: 'Address was missing a required field'))
+    end
+
+    requested_addresses.each do |address|
+      components = address['components']
+      metadata = address['metadata']
+      analysis = address['analysis']
+      dpv_match_code = analysis['dpv_match_code']
+
+      result = { address_line_one: address['delivery_line_1'],
+                 city: components['city_name'],
+                 state: components['state_abbreviation'],
+                 zip_code: components['zipcode'],
+                 latitude: metadata['latitude'],
+                 longitude: metadata['longitude'],
+                 valid: dpv_match_code == 'Y' ? true : false,
+                 additional_info: get_match_info(dpv_match_code) }
+
+      results.push(result)
+    end
+
+    results
   end
 
   def run(addresses)
@@ -28,66 +103,22 @@ class UsStreetMultipleValidator
     client = SmartyStreets::ClientBuilder.new(credentials).with_licenses(licences)
                                                           .build_us_street_api_client
 
-    batch = SmartyStreets::Batch.new
+    validated = validate_addresses(addresses)
+    valid_addresses = validated[:valid]
+    invalid_addresses = validated[:invalid]
 
-    # Documentation for input fields can be found at:
-    # https://smartystreets.com/docs/cloud/us-street-api
-
-    batch.add(SmartyStreets::USStreet::Lookup.new)
-    batch[0].input_id = '8675309'  # Optional ID from your system
-    batch[0].addressee = 'John Doe'
-    batch[0].street = '1600 amphitheatre parkway'
-    batch[0].street2 = 'second star to the right'
-    batch[0].secondary = 'APT 2'
-    batch[0].urbanization = ''  # Only applies to Puerto Rico addresses
-    batch[0].lastline = 'Mountain view, California'
-    batch[0].zipcode = '21229'
-    batch[0].candidates = 3
-    batch[0].match = INVALID # "invalid" is the most permissive match,
-                                      # this will always return at least one result even if the address is invalid.
-                                      # Refer to the documentation for additional Match Strategy options.
-
-    batch.add(SmartyStreets::USStreet::Lookup.new('1 Rosedale, Baltimore, Maryland')) # Freeform addresses work too.
-    batch[1].candidates = 10 # Allows up to ten possible matches to be returned (default is 1).
-
-    batch.add(SmartyStreets::USStreet::Lookup.new('123 Bogus Street, Pretend Lake, Oklahoma'))
-
-    batch.add(SmartyStreets::USStreet::Lookup.new)
-    batch[3].street = '1 Infinite Loop'
-    batch[3].zipcode = '95014' # You can just input the street and ZIP if you want.
+    batch = build_batch(valid_addresses)
 
     begin
-      client.send_batch(batch)
+      log_info 'Sending batch address validation request'
+      result = client.send_batch(batch)
+      log_info 'Successfully sent batch address validation request'
     rescue SmartyStreets::SmartyError => err
-      Rails.logger.error err
-      return
+      log_error err
+      raise err
     end
 
-    batch.each_with_index do |lookup, i|
-      candidates = lookup.result
-
-      if candidates.empty?
-        puts "Address #{i} is invalid.\n\n"
-        next
-      end
-
-      puts "Address #{i} is valid. (There is at least one candidate)"
-
-      candidates.each do |candidate|
-        components = candidate.components
-        metadata = candidate.metadata
-
-        puts "\nCandidate #{candidate.candidate_index} : "
-        puts "Input ID: #{candidate.input_id}"
-        puts "Delivery line 1: #{candidate.delivery_line_1}"
-        puts "Last line:       #{candidate.last_line}"
-        puts "ZIP Code:        #{components.zipcode}-#{components.plus4_code}"
-        puts "County:          #{metadata.county_name}"
-        puts "Latitude:        #{metadata.latitude}"
-        puts "Longitude:       #{metadata.longitude}"
-        puts
-      end
-    end
+    transform_result(result, invalid_addresses)
   end
 
   private
@@ -102,5 +133,28 @@ class UsStreetMultipleValidator
 
   def licences
     [ENV['smarty_streets_licences']]
+  end
+
+  def log_info(message)
+    Rails.logger.info "#{self.class} - #{message}"
+  end
+
+  def log_warning(message)
+    Rails.logger.warn "#{self.class} - #{message}"
+  end
+
+  def log_error(message)
+    Rails.logger.error "#{self.class} - #{message}"
+  end
+
+  def get_match_info(dpv_match_code)
+    info = {
+      'Y' => 'Confirmed; entire address is present in the USPS data.',
+      'N' => 'Not confirmed; address is not present in the USPS data.',
+      'S' => 'Confirmed by ignoring secondary info; the main address is present in the USPS data, but the submitted secondary information (apartment, suite, etc.) was not recognized.',
+      'D' => 'Confirmed but missing secondary info; the main address is present in the USPS data, but it is missing secondary information (apartment, suite, etc.).'
+    }
+
+    info[dpv_match_code]
   end
 end
