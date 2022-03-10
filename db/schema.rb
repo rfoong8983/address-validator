@@ -10,27 +10,16 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 2022_03_09_042105) do
+ActiveRecord::Schema.define(version: 2022_03_10_031553) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
 
-  create_table "api_request_contents", force: :cascade do |t|
-    t.string "host"
-    t.string "pathname"
-    t.json "request_body"
-    t.json "response"
-    t.bigint "api_request_id"
-    t.datetime "created_at", precision: 6, null: false
-    t.datetime "updated_at", precision: 6, null: false
-    t.index ["api_request_id"], name: "index_api_request_contents_on_api_request_id"
-  end
-
   create_table "api_requests", force: :cascade do |t|
-    t.string "state"
+    t.string "reference_uuid"
     t.datetime "created_at", precision: 6, null: false
     t.datetime "updated_at", precision: 6, null: false
+    t.string "aasm_state"
   end
 
-  add_foreign_key "api_request_contents", "api_requests"
 end
