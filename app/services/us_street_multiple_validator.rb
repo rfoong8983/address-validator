@@ -132,7 +132,9 @@ class UsStreetMultipleValidator
 
       @api_request.start!
 
-      client.send_batch(batch)
+      Rails.cache.fetch(get_cache_key_for(batch.all_lookups)) do
+        client.send_batch(batch)
+      end
 
       @api_request.complete!
 
